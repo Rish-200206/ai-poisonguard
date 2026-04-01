@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+scikit-learn
+pandas
+numpy
+scipy
+python-multipart
+pydantic
+joblib
+torch
+umap-learn
+hdbscan
+adversarial-robustness-toolbox
