@@ -13,8 +13,10 @@ class AnalysisResponse(BaseModel):
     risk_level: str = Field(description="LOW, MEDIUM, HIGH, CRITICAL")
     domain_profile: str = Field(description="Domain profile used for analysis")
     n_samples: int = Field(description="Total samples analysed")
-    n_flagged: int = Field(description="Total unique flagged samples")
+    n_flagged: int = Field(description="Total unique flagged samples (ensemble threshold met)")
+    n_warnings: int = Field(default=0, description="Samples with single-layer flags (below ensemble threshold)")
     flagged_ratio: float = Field(description="Fraction of samples flagged")
+    ensemble_threshold: int = Field(default=2, description="Minimum layers required to confirm a sample as poisoned")
     summary: str = Field(description="Human-readable summary")
 
     # Per-layer results (6 layers)

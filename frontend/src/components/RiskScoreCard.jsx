@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-function RiskScoreCard({ riskScore, riskLevel, nFlagged, nSamples, status }) {
+function RiskScoreCard({ riskScore, riskLevel, nFlagged, nWarnings = 0, nSamples, status, ensembleThreshold = 2 }) {
   const [displayScore, setDisplayScore] = useState(0);
 
   useEffect(() => {
@@ -24,12 +24,6 @@ function RiskScoreCard({ riskScore, riskLevel, nFlagged, nSamples, status }) {
     if (riskScore < 40) return '#fbbf24';
     if (riskScore < 70) return '#fb923c';
     return '#f87171';
-  };
-
-  const getGradient = () => {
-    if (riskScore < 15) return 'linear-gradient(135deg, #10b981, #22d3ee)';
-    if (riskScore < 40) return 'linear-gradient(135deg, #f59e0b, #fb923c)';
-    return 'linear-gradient(135deg, #ef4444, #f97316)';
   };
 
   const getGlowShadow = () => {
@@ -115,7 +109,7 @@ function RiskScoreCard({ riskScore, riskLevel, nFlagged, nSamples, status }) {
       </div>
 
       {/* Badge */}
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
         <span className={`tag ${getTagClass()}`} style={{
           padding: '5px 16px',
           fontSize: '11px',
@@ -124,25 +118,37 @@ function RiskScoreCard({ riskScore, riskLevel, nFlagged, nSamples, status }) {
         </span>
       </div>
 
+      {/* Ensemble voting note */}
+      <p style={{
+        fontSize: '10px',
+        color: 'var(--text-muted)',
+        marginBottom: '16px',
+        opacity: 0.7,
+        lineHeight: 1.4,
+      }}>
+        Ensemble Voting: ≥{ensembleThreshold} layer agreement required
+      </p>
+
       {/* Stats */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: '1fr 1fr 1fr',
-        gap: '8px',
+        gridTemplateColumns: '1fr 1fr 1fr 1fr',
+        gap: '6px',
       }}>
         {[
           { label: 'Status', value: status, vColor: color },
-          { label: 'Flagged', value: nFlagged.toLocaleString(), vColor: 'var(--accent-red)' },
+          { label: 'Confirmed', value: nFlagged.toLocaleString(), vColor: 'var(--accent-red)' },
+          { label: 'Warnings', value: nWarnings.toLocaleString(), vColor: '#fbbf24' },
           { label: 'Total', value: nSamples.toLocaleString(), vColor: 'var(--text-primary)' },
         ].map(({ label, value, vColor }) => (
           <div key={label} style={{
-            padding: '10px 8px',
+            padding: '10px 6px',
             borderRadius: 'var(--radius-sm)',
             background: 'rgba(12, 18, 34, 0.5)',
             border: '1px solid var(--border-subtle)',
           }}>
             <p style={{
-              fontSize: '10px',
+              fontSize: '9px',
               color: 'var(--text-muted)',
               textTransform: 'uppercase',
               letterSpacing: '0.06em',
@@ -152,7 +158,7 @@ function RiskScoreCard({ riskScore, riskLevel, nFlagged, nSamples, status }) {
             <p style={{
               fontWeight: 700,
               color: vColor,
-              fontSize: '14px',
+              fontSize: '13px',
               textTransform: label === 'Status' ? 'capitalize' : 'none',
             }}>{value}</p>
           </div>

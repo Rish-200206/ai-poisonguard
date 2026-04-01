@@ -379,8 +379,10 @@ function Dashboard() {
               riskScore={results.risk_score}
               riskLevel={results.risk_level}
               nFlagged={results.n_flagged}
+              nWarnings={results.n_warnings || 0}
               nSamples={results.n_samples}
               status={results.status}
+              ensembleThreshold={results.ensemble_threshold || 2}
             />
           ) : (
             <div className="glass-card p-6 flex flex-col items-center justify-center text-center animate-fadeIn stagger-1">

@@ -9,12 +9,32 @@ function ClusterScatterPlot({ scatterData }) {
     '#f97316', '#ec4899', '#14b8a6', '#a855f7', '#6366f1',
   ];
 
-  const cleanData = useMemo(() => scatterData.filter(d => !d.is_poisoned), [scatterData]);
-  const poisonedData = useMemo(() => scatterData.filter(d => d.is_poisoned), [scatterData]);
+  // Three-tier classification from ensemble voting
+  const cleanData = useMemo(
+    () => scatterData.filter(d => !d.is_poisoned && !d.is_warning),
+    [scatterData]
+  );
+  const warningData = useMemo(
+    () => scatterData.filter(d => d.is_warning && !d.is_poisoned),
+    [scatterData]
+  );
+  const poisonedData = useMemo(
+    () => scatterData.filter(d => d.is_poisoned),
+    [scatterData]
+  );
 
   const CustomTooltip = ({ active, payload }) => {
     if (!active || !payload || !payload[0]) return null;
     const d = payload[0].payload;
+
+    const getRiskLabel = () => {
+      if (d.is_poisoned) return { text: '⚠ Suspected Poisoned', color: 'var(--accent-red)' };
+      if (d.is_warning) return { text: '⚡ Single-Layer Warning', color: '#fbbf24' };
+      return { text: '✓ Clean', color: 'var(--accent-green)' };
+    };
+
+    const risk = getRiskLabel();
+
     return (
       <div style={{
         background: 'var(--bg-card)',
@@ -24,12 +44,18 @@ function ClusterScatterPlot({ scatterData }) {
         fontSize: '12px',
         lineHeight: '1.6',
       }}>
-        <p style={{ color: d.is_poisoned ? 'var(--accent-red)' : 'var(--accent-green)', fontWeight: 600 }}>
-          {d.is_poisoned ? '⚠ Suspected Poisoned' : '✓ Clean'}
-        </p>
+        <p style={{ color: risk.color, fontWeight: 600 }}>{risk.text}</p>
         <p style={{ color: 'var(--text-secondary)' }}>Sample #{d.index}</p>
         <p style={{ color: 'var(--text-secondary)' }}>Cluster: {d.cluster}</p>
-        <p style={{ color: 'var(--text-secondary)' }}>Score: {d.score.toFixed(3)}</p>
+        <p style={{ color: 'var(--text-secondary)' }}>Composite Score: {d.score.toFixed(3)}</p>
+        {d.ensemble_risk_score != null && (
+          <p style={{ color: 'var(--text-secondary)' }}>
+            Ensemble Risk: {d.ensemble_risk_score}% ({d.risk_category})
+          </p>
+        )}
+        {d.vote_count != null && (
+          <p style={{ color: 'var(--text-secondary)' }}>Layer Votes: {d.vote_count}/6</p>
+        )}
         {d.label !== null && (
           <p style={{ color: 'var(--text-secondary)' }}>Label: {d.label}</p>
         )}
@@ -42,12 +68,16 @@ function ClusterScatterPlot({ scatterData }) {
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold uppercase tracking-wider"
           style={{ color: 'var(--text-secondary)' }}>
-          UMAP Cluster Projection
+          UMAP Cluster Projection — Ensemble Voting
         </h3>
         <div className="flex items-center gap-4 text-xs">
           <div className="flex items-center gap-1.5">
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-green)' }} />
             <span style={{ color: 'var(--text-muted)' }}>Clean ({cleanData.length})</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fbbf24' }} />
+            <span style={{ color: 'var(--text-muted)' }}>Warning ({warningData.length})</span>
           </div>
           <div className="flex items-center gap-1.5">
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-red)' }} />
@@ -80,13 +110,27 @@ function ClusterScatterPlot({ scatterData }) {
                 <Cell
                   key={`clean-${i}`}
                   fill={clusterColors[entry.cluster % clusterColors.length]}
-                  fillOpacity={0.5}
+                  fillOpacity={0.4}
                   r={3}
                 />
               ))}
             </Scatter>
 
-            {/* Poisoned samples */}
+            {/* Warning samples (single-layer flag) */}
+            <Scatter name="Warning" data={warningData} fill="#fbbf24">
+              {warningData.map((entry, i) => (
+                <Cell
+                  key={`warn-${i}`}
+                  fill="#fbbf24"
+                  fillOpacity={0.7}
+                  r={4}
+                  stroke="#fcd34d"
+                  strokeWidth={1}
+                />
+              ))}
+            </Scatter>
+
+            {/* Poisoned samples (ensemble confirmed) */}
             <Scatter name="Poisoned" data={poisonedData} fill="var(--accent-red)">
               {poisonedData.map((entry, i) => (
                 <Cell

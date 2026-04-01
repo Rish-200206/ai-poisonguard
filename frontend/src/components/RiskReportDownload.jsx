@@ -102,20 +102,25 @@ function RiskReportDownload({ results }) {
 
     ${topFlagged.length > 0 ? `
     <div class="section">
-      <h2>Top Flagged Samples (${Math.min(topFlagged.length, 30)} of ${(flagged_samples || []).length})</h2>
+      <h2>Flagged Samples — Ensemble Voting (${Math.min(topFlagged.length, 30)} of ${(flagged_samples || []).length})</h2>
       <table>
-        <thead><tr><th>Index</th><th>Score</th><th>Layers</th><th>Detection Sources</th><th>Label</th></tr></thead>
+        <thead><tr><th>Index</th><th>Risk Score</th><th>Risk Level</th><th>Votes</th><th>Detection Sources</th><th>Label</th></tr></thead>
         <tbody>
-          ${topFlagged.map(s => `<tr>
+          ${topFlagged.map(s => {
+            const riskPct = s.ensemble_risk_score ?? (s.score * 100).toFixed(0);
+            const riskCat = s.risk_category || (s.n_layers >= 2 ? 'Compromised' : 'Warning');
+            const confirmed = s.is_confirmed_poison !== false;
+            const catColor = riskCat === 'Critical' ? '#f87171' : riskCat === 'High Risk' ? '#fb923c' : riskCat === 'Compromised' ? '#fbbf24' : '#60a5fa';
+            const layerCls = l => l === 'statistical' ? 'tag-stat' : l === 'spectral' ? 'tag-spec' : l === 'clustering' ? 'tag-clust' : 'tag-art';
+            return `<tr style="border-left: 3px solid ${confirmed ? '#ef4444' : '#3b82f6'}">
             <td>${s.index}</td>
-            <td>${s.score.toFixed(4)}</td>
-            <td>${s.n_layers}/4</td>
-            <td>${(s.layers || []).map(l => {
-              const cls = l === 'statistical' ? 'tag-stat' : l === 'spectral' ? 'tag-spec' : l === 'clustering' ? 'tag-clust' : 'tag-art';
-              return `<span class="tag ${cls}">${l}</span>`;
-            }).join('')}</td>
+            <td><strong>${riskPct}%</strong></td>
+            <td><span class="tag" style="background: ${catColor}22; color: ${catColor}; border: 1px solid ${catColor}44">${riskCat}</span></td>
+            <td>${s.n_layers}/6</td>
+            <td>${(s.layers || []).map(l => `<span class="tag ${layerCls(l)}">${l}</span>`).join('')}</td>
             <td>${s.label ?? '–'}</td>
-          </tr>`).join('')}
+          </tr>`;
+          }).join('')}
         </tbody>
       </table>
     </div>` : ''}

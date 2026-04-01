@@ -276,21 +276,57 @@ async def analyze_dataset(
     backdoor_result = backdoor_detector.detect(X, y, model)
 
     # ═══════════════════════════════════════════════════════════════
-    # AGGREGATE RESULTS
+    # ENSEMBLE VOTING AGGREGATION
     # ═══════════════════════════════════════════════════════════════
+    #
+    # Instead of simple OR logic (any single flag → poisoned), we use
+    # an ensemble voting system to reduce false positives:
+    #   - A sample must be flagged by ≥2 layers to be "Suspected Poison"
+    #   - Each sample gets a weighted risk score based on layer confidence
+    #   - Layer 2 (Spectral) and Layer 3 (Clustering) get higher weights
+    #     because they are more structurally robust detectors
+    #   - Layer 1 (Statistical Z-score) gets a lower confidence weight
+    #     because it is inherently noisier
+    # ═══════════════════════════════════════════════════════════════
+
+    ENSEMBLE_VOTE_THRESHOLD = 2  # Minimum layers that must flag a sample
+
+    # Layer confidence weights for ensemble voting
+    # Higher weight = more trustworthy signal
+    LAYER_CONFIDENCE_WEIGHTS = {
+        "statistical": 0.10,   # Noisiest — Z-score produces many false positives
+        "spectral":    0.25,   # SVD-based, structurally robust
+        "clustering":  0.25,   # UMAP+KMeans, structurally robust
+        "art":         0.15,   # IBM ART standardised detection
+        "influence":   0.15,   # Influence function analysis
+        "backdoor":    0.10,   # Backdoor trigger scanning
+    }
 
     weights = profile["layer_weights"]
 
-    # Per-sample composite score
+    # All layer results keyed by name
+    layer_results = {
+        "statistical": stat_result,
+        "spectral":    spec_result,
+        "clustering":  clust_result,
+        "art":         art_result,
+        "influence":   influence_result,
+        "backdoor":    backdoor_result,
+    }
+    all_results = list(layer_results.values())
+
+    LAYER_DISPLAY_NAMES = {
+        "statistical": "Statistical Analysis",
+        "spectral":    "Spectral Signatures",
+        "clustering":  "Activation Clustering",
+        "art":         "IBM ART",
+        "influence":   "Influence Functions",
+        "backdoor":    "Backdoor Trigger Scan",
+    }
+
+    # ── Per-sample composite score (weighted sum across all layers) ──
     composite_scores = np.zeros(n_samples)
-    for layer_key, result in [
-        ("statistical", stat_result),
-        ("spectral", spec_result),
-        ("clustering", clust_result),
-        ("art", art_result),
-        ("influence", influence_result),
-        ("backdoor", backdoor_result),
-    ]:
+    for layer_key, result in layer_results.items():
         w = weights.get(layer_key, 0.10)
         scores = np.array(result["scores"])
         composite_scores += w * scores
@@ -299,19 +335,83 @@ async def analyze_dataset(
     if composite_scores.max() > 0:
         composite_scores = composite_scores / composite_scores.max()
 
-    # Combine all flagged indices
-    all_flagged = set()
-    all_results = [
-        stat_result, spec_result, clust_result,
-        art_result, influence_result, backdoor_result,
-    ]
-    for result in all_results:
-        all_flagged.update(result["flagged_indices"])
-    n_flagged = len(all_flagged)
+    # ── Per-sample vote counting ──
+    # For each sample, count how many layers flagged it and compute
+    # a weighted ensemble score using confidence weights.
+    sample_vote_count = np.zeros(n_samples, dtype=int)
+    sample_weighted_score = np.zeros(n_samples)
+    sample_flagging_layers = {i: [] for i in range(n_samples)}
+
+    for layer_key, result in layer_results.items():
+        confidence_w = LAYER_CONFIDENCE_WEIGHTS[layer_key]
+        for idx in result["flagged_indices"]:
+            if idx < n_samples:
+                sample_vote_count[idx] += 1
+                sample_weighted_score[idx] += confidence_w
+                sample_flagging_layers[idx].append(layer_key)
+
+    # ── Apply ensemble threshold ──
+    # Only samples with votes >= threshold are officially "Suspected Poison"
+    ensemble_flagged = set(
+        int(i) for i in range(n_samples)
+        if sample_vote_count[i] >= ENSEMBLE_VOTE_THRESHOLD
+    )
+
+    # Samples with exactly 1 flag are kept as "warnings" (shown but not
+    # counted as poisoned) to preserve transparency.
+    single_flag_warnings = set(
+        int(i) for i in range(n_samples)
+        if sample_vote_count[i] == 1
+    )
+
+    n_flagged = len(ensemble_flagged)
+    n_warnings = len(single_flag_warnings)
     flagged_ratio = n_flagged / n_samples
 
-    # Risk score 0-100
-    risk_score = round(min(100, flagged_ratio * 100 * 3 + composite_scores.mean() * 70), 1)
+    def _compute_sample_risk(
+        vote_count: int, weighted_score: float
+    ) -> tuple:
+        """
+        Compute per-sample risk category and percentage score
+        based on ensemble votes.
+
+        Returns (risk_pct, risk_category)
+        """
+        # Normalise weighted_score to 0-100 range
+        # Max possible weighted_score is sum of all confidence weights = 1.0
+        raw_pct = min(100.0, weighted_score * 100)
+
+        if vote_count == 0:
+            return (0.0, "Clean")
+        elif vote_count == 1:
+            return (max(raw_pct, 20.0), "Warning")
+        elif vote_count == 2:
+            return (max(raw_pct, 40.0), "Compromised")
+        elif vote_count == 3:
+            return (max(raw_pct, 60.0), "High Risk")
+        else:  # 4+ layers
+            return (max(raw_pct, 80.0), "Critical")
+
+    # ── Overall risk score (0-100) ──
+    # Weighted combination of:
+    #   - Ensemble-flagged contamination rate (how many samples pass threshold)
+    #   - Mean composite score of flagged samples
+    #   - Number of active detection layers that found something
+    if n_flagged > 0:
+        mean_flagged_composite = np.mean(
+            [composite_scores[i] for i in ensemble_flagged]
+        )
+    else:
+        mean_flagged_composite = 0.0
+
+    risk_score = round(
+        min(100,
+            flagged_ratio * 100 * 3          # Contamination contribution
+            + mean_flagged_composite * 50    # Severity contribution
+            + composite_scores.mean() * 20   # Global noise contribution
+        ),
+        1,
+    )
 
     # Risk level
     if risk_score < 15:
@@ -334,43 +434,49 @@ async def analyze_dataset(
     scatter_data = []
     for i in range(n_samples):
         coord = umap_coords[i] if i < len(umap_coords) else [0, 0]
+        vote_c = int(sample_vote_count[i])
+        risk_pct, risk_cat = _compute_sample_risk(
+            vote_c, float(sample_weighted_score[i])
+        )
         scatter_data.append({
             "index": i,
             "x": float(coord[0]),
             "y": float(coord[1]),
             "cluster": int(cluster_labels[i]) if i < len(cluster_labels) else 0,
-            "is_poisoned": i in all_flagged,
+            "is_poisoned": i in ensemble_flagged,   # Ensemble threshold applied
+            "is_warning": i in single_flag_warnings,
             "score": float(composite_scores[i]),
+            "vote_count": vote_c,
+            "ensemble_risk_score": round(risk_pct, 1),
+            "risk_category": risk_cat,
             "label": int(y[i]) if y is not None and i < len(y) else None,
         })
 
     # ── Flagged samples table with RISK REASONS ──
+    # Include both ensemble-flagged AND single-flag-warnings for transparency
+    all_reportable = ensemble_flagged | single_flag_warnings
+
     flagged_samples = []
-    for idx in sorted(all_flagged):
-        layers_flagging = []
+    for idx in sorted(all_reportable):
+        layers_flagging = sample_flagging_layers.get(idx, [])
         risk_reasons = []
 
-        if idx in stat_result["flagged_indices"]:
-            layers_flagging.append("statistical")
-            # Build specific risk reason
+        if "statistical" in layers_flagging:
             z_max = stat_result.get("z_scores_max", [])
             if idx < len(z_max):
-                # Find which features were outliers
                 z_val = z_max[idx]
                 risk_reasons.append(
                     f"Z-score outlier (max z={z_val:.2f}, threshold={profile['z_threshold']})"
                 )
 
-        if idx in spec_result["flagged_indices"]:
-            layers_flagging.append("spectral")
+        if "spectral" in layers_flagging:
             raw_scores = spec_result.get("raw_scores", [])
             if idx < len(raw_scores):
                 risk_reasons.append(
                     f"Spectral signature anomaly (score={raw_scores[idx]:.3f})"
                 )
 
-        if idx in clust_result["flagged_indices"]:
-            layers_flagging.append("clustering")
+        if "clustering" in layers_flagging:
             cl = cluster_labels[idx] if idx < len(cluster_labels) else -1
             cluster_analysis = clust_result.get("cluster_analysis", [])
             for ca in cluster_analysis:
@@ -380,31 +486,37 @@ async def analyze_dataset(
                     )
                     break
 
-        if idx in art_result["flagged_indices"]:
-            layers_flagging.append("art")
+        if "art" in layers_flagging:
             risk_reasons.append("Flagged by IBM ART Activation Defence")
 
-        if idx in influence_result["flagged_indices"]:
-            layers_flagging.append("influence")
+        if "influence" in layers_flagging:
             inf_scores = influence_result.get("scores", [])
             if idx < len(inf_scores):
                 risk_reasons.append(
                     f"High influence score ({inf_scores[idx]:.3f}) — disproportionate model impact"
                 )
 
-        if idx in backdoor_result["flagged_indices"]:
-            layers_flagging.append("backdoor")
+        if "backdoor" in layers_flagging:
             bd_scores = backdoor_result.get("scores", [])
             if idx < len(bd_scores):
                 risk_reasons.append(
                     f"Backdoor trigger pattern detected (score={bd_scores[idx]:.3f})"
                 )
 
-        # Build risk reason summary
-        if not risk_reasons:
-            risk_reason = "Anomalous sample detected across detection layers"
+        # Build risk reason with clear layer attribution
+        n_votes = len(layers_flagging)
+        layer_names = [LAYER_DISPLAY_NAMES.get(l, l) for l in layers_flagging]
+        flagged_by_str = f"Flagged by: {', '.join(layer_names)}"
+
+        if risk_reasons:
+            risk_reason = f"{flagged_by_str}. Details: {'; '.join(risk_reasons)}"
         else:
-            risk_reason = "; ".join(risk_reasons)
+            risk_reason = flagged_by_str
+
+        # Per-sample ensemble risk
+        risk_pct, risk_cat = _compute_sample_risk(
+            n_votes, float(sample_weighted_score[idx])
+        )
 
         sample_features = {}
         for j, fname in enumerate(feature_names):
@@ -415,14 +527,20 @@ async def analyze_dataset(
             "index": int(idx),
             "score": float(composite_scores[idx]),
             "layers": layers_flagging,
-            "n_layers": len(layers_flagging),
+            "n_layers": n_votes,
             "features": sample_features,
             "label": int(y[idx]) if y is not None and idx < len(y) else None,
             "risk_reason": risk_reason,
+            "ensemble_risk_score": round(risk_pct, 1),
+            "risk_category": risk_cat,
+            "is_confirmed_poison": idx in ensemble_flagged,
         })
 
-    # Sort by score descending
-    flagged_samples.sort(key=lambda x: x["score"], reverse=True)
+    # Sort by ensemble risk score (then composite score) descending
+    flagged_samples.sort(
+        key=lambda x: (x["ensemble_risk_score"], x["score"]),
+        reverse=True,
+    )
 
     # ── Influence scores (top 20) ──
     top_indices = np.argsort(composite_scores)[::-1][:20]
@@ -430,7 +548,7 @@ async def analyze_dataset(
         {
             "index": int(idx),
             "score": float(composite_scores[idx]),
-            "is_flagged": idx in all_flagged,
+            "is_flagged": idx in ensemble_flagged,
             "label": int(y[idx]) if y is not None and idx < len(y) else None,
         }
         for idx in top_indices
@@ -449,8 +567,10 @@ async def analyze_dataset(
     summary = (
         f"Analysed {n_samples} samples with {n_features} features "
         f"using {profile['name']} profile. "
-        f"Found {n_flagged} suspicious samples ({flagged_ratio:.1%}) "
-        f"across {n_active_layers} of 6 detection layers. "
+        f"Ensemble voting (≥{ENSEMBLE_VOTE_THRESHOLD} layers required): "
+        f"{n_flagged} confirmed suspicious samples ({flagged_ratio:.1%}), "
+        f"{n_warnings} single-layer warnings. "
+        f"{n_active_layers} of 6 detection layers active. "
         f"Risk score: {risk_score}/100 ({risk_level}). "
         f"Analysis completed in {elapsed}s."
     )
@@ -464,8 +584,10 @@ async def analyze_dataset(
         domain_profile=domain,
         n_samples=n_samples,
         n_flagged=n_flagged,
+        n_warnings=n_warnings,
         flagged_ratio=round(flagged_ratio, 4),
         summary=summary,
+        ensemble_threshold=ENSEMBLE_VOTE_THRESHOLD,
         statistical=stat_result,
         spectral=spec_result,
         clustering=clust_result,

@@ -1,23 +1,32 @@
 import React, { useState, useMemo } from 'react';
-import { Download, ChevronUp, ChevronDown } from 'lucide-react';
+import { Download, ChevronUp, ChevronDown, ShieldAlert, ShieldCheck } from 'lucide-react';
 import Papa from 'papaparse';
 
 function FlaggedSamplesTable({ flaggedSamples }) {
-  const [sortKey, setSortKey] = useState('score');
+  const [sortKey, setSortKey] = useState('ensemble_risk_score');
   const [sortDir, setSortDir] = useState('desc');
   const [page, setPage] = useState(0);
+  const [filterMode, setFilterMode] = useState('all'); // 'all' | 'confirmed' | 'warnings'
   const perPage = 15;
 
   if (!flaggedSamples || flaggedSamples.length === 0) return null;
 
+  const confirmedCount = flaggedSamples.filter(s => s.is_confirmed_poison).length;
+  const warningCount = flaggedSamples.filter(s => !s.is_confirmed_poison).length;
+
+  const filtered = useMemo(() => {
+    if (filterMode === 'confirmed') return flaggedSamples.filter(s => s.is_confirmed_poison);
+    if (filterMode === 'warnings') return flaggedSamples.filter(s => !s.is_confirmed_poison);
+    return flaggedSamples;
+  }, [flaggedSamples, filterMode]);
+
   const sorted = useMemo(() => {
-    return [...flaggedSamples].sort((a, b) => {
-      let av = a[sortKey], bv = b[sortKey];
-      if (sortKey === 'n_layers') { av = a.n_layers; bv = b.n_layers; }
+    return [...filtered].sort((a, b) => {
+      let av = a[sortKey] ?? 0, bv = b[sortKey] ?? 0;
       if (sortDir === 'asc') return av > bv ? 1 : -1;
       return av < bv ? 1 : -1;
     });
-  }, [flaggedSamples, sortKey, sortDir]);
+  }, [filtered, sortKey, sortDir]);
 
   const paginated = sorted.slice(page * perPage, (page + 1) * perPage);
   const totalPages = Math.ceil(sorted.length / perPage);
@@ -38,6 +47,21 @@ function FlaggedSamplesTable({ flaggedSamples }) {
       : <ChevronDown size={12} className="inline ml-0.5" />;
   };
 
+  const getRiskCategoryStyle = (category) => {
+    switch (category) {
+      case 'Critical':
+        return { background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)' };
+      case 'High Risk':
+        return { background: 'rgba(249, 115, 22, 0.15)', color: '#fb923c', border: '1px solid rgba(249, 115, 22, 0.3)' };
+      case 'Compromised':
+        return { background: 'rgba(234, 179, 8, 0.15)', color: '#fbbf24', border: '1px solid rgba(234, 179, 8, 0.3)' };
+      case 'Warning':
+        return { background: 'rgba(59, 130, 246, 0.12)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.25)' };
+      default:
+        return { background: 'rgba(34, 197, 94, 0.12)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.25)' };
+    }
+  };
+
   const handleDownload = () => {
     const rows = flaggedSamples.map(s => {
       const featureCols = {};
@@ -48,7 +72,10 @@ function FlaggedSamplesTable({ flaggedSamples }) {
       }
       return {
         index: s.index,
-        score: s.score.toFixed(4),
+        composite_score: s.score.toFixed(4),
+        ensemble_risk_score: s.ensemble_risk_score ?? '',
+        risk_category: s.risk_category ?? '',
+        is_confirmed_poison: s.is_confirmed_poison ? 'YES' : 'NO',
         layers: s.layers.join(', '),
         n_layers: s.n_layers,
         risk_reason: s.risk_reason || '',
@@ -72,39 +99,79 @@ function FlaggedSamplesTable({ flaggedSamples }) {
         <div>
           <h3 className="text-sm font-semibold uppercase tracking-wider"
             style={{ color: 'var(--text-secondary)' }}>
-            Suspected Poison Samples
+            Ensemble Voting Results
           </h3>
           <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-            {flaggedSamples.length} samples flagged across detection layers
+            {confirmedCount} confirmed suspicious (≥2 layers) · {warningCount} single-layer warnings
           </p>
         </div>
-        <button
-          onClick={handleDownload}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold hover:opacity-80 transition-opacity"
-          style={{
-            background: 'rgba(34, 197, 94, 0.1)',
-            border: '1px solid rgba(34, 197, 94, 0.3)',
-            color: 'var(--accent-green)',
-            cursor: 'pointer',
-          }}
-        >
-          <Download size={14} />
-          Export CSV
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Filter toggles */}
+          <div style={{
+            display: 'inline-flex',
+            gap: '2px',
+            padding: '3px',
+            borderRadius: 'var(--radius-md)',
+            background: 'rgba(12, 18, 34, 0.6)',
+            border: '1px solid var(--border)',
+          }}>
+            {[
+              { id: 'all', label: `All (${flaggedSamples.length})` },
+              { id: 'confirmed', label: `Confirmed (${confirmedCount})` },
+              { id: 'warnings', label: `Warnings (${warningCount})` },
+            ].map(f => (
+              <button
+                key={f.id}
+                onClick={() => { setFilterMode(f.id); setPage(0); }}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  background: filterMode === f.id ? 'var(--gradient-primary)' : 'transparent',
+                  color: filterMode === f.id ? 'white' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                  border: 'none',
+                  transition: 'all 0.2s ease',
+                  letterSpacing: '0.01em',
+                }}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={handleDownload}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold hover:opacity-80 transition-opacity"
+            style={{
+              background: 'rgba(34, 197, 94, 0.1)',
+              border: '1px solid rgba(34, 197, 94, 0.3)',
+              color: 'var(--accent-green)',
+              cursor: 'pointer',
+            }}
+          >
+            <Download size={14} />
+            Export CSV
+          </button>
+        </div>
       </div>
 
-      <div style={{ overflowX: 'auto', maxHeight: '400px', overflowY: 'auto' }}>
+      <div style={{ overflowX: 'auto', maxHeight: '450px', overflowY: 'auto' }}>
         <table className="data-table">
           <thead>
             <tr>
               <th onClick={() => toggleSort('index')} style={{ cursor: 'pointer' }}>
                 Index <SortIcon col="index" />
               </th>
-              <th onClick={() => toggleSort('score')} style={{ cursor: 'pointer' }}>
-                Score <SortIcon col="score" />
+              <th onClick={() => toggleSort('ensemble_risk_score')} style={{ cursor: 'pointer' }}>
+                Risk Score <SortIcon col="ensemble_risk_score" />
+              </th>
+              <th onClick={() => toggleSort('risk_category')} style={{ cursor: 'pointer' }}>
+                Risk Level <SortIcon col="risk_category" />
               </th>
               <th onClick={() => toggleSort('n_layers')} style={{ cursor: 'pointer' }}>
-                Layers <SortIcon col="n_layers" />
+                Votes <SortIcon col="n_layers" />
               </th>
               <th>Detection Sources</th>
               <th>Risk Reason</th>
@@ -112,84 +179,125 @@ function FlaggedSamplesTable({ flaggedSamples }) {
             </tr>
           </thead>
           <tbody>
-            {paginated.map((sample) => (
-              <tr key={sample.index}>
-                <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>
-                  {sample.index}
-                </td>
-                <td>
-                  <div className="flex items-center gap-2">
-                    <div style={{
-                      width: '40px',
-                      height: '4px',
-                      borderRadius: '2px',
-                      background: 'var(--border)',
-                      overflow: 'hidden',
-                    }}>
-                      <div style={{
-                        width: `${sample.score * 100}%`,
-                        height: '100%',
-                        borderRadius: '2px',
-                        background: sample.score > 0.7 ? 'var(--accent-red)'
-                          : sample.score > 0.4 ? 'var(--accent-orange)' : 'var(--accent-yellow)',
-                      }} />
+            {paginated.map((sample) => {
+              const catStyle = getRiskCategoryStyle(sample.risk_category);
+              const riskPct = sample.ensemble_risk_score ?? 0;
+
+              return (
+                <tr key={sample.index} style={{
+                  opacity: sample.is_confirmed_poison ? 1 : 0.7,
+                  borderLeft: sample.is_confirmed_poison
+                    ? '3px solid var(--accent-red)'
+                    : '3px solid rgba(59, 130, 246, 0.3)',
+                }}>
+                  <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>
+                    <div className="flex items-center gap-1.5">
+                      {sample.is_confirmed_poison
+                        ? <ShieldAlert size={13} style={{ color: 'var(--accent-red)', flexShrink: 0 }} />
+                        : <ShieldCheck size={13} style={{ color: 'var(--accent-blue, #60a5fa)', flexShrink: 0, opacity: 0.6 }} />
+                      }
+                      {sample.index}
                     </div>
-                    <span style={{ fontFamily: 'monospace', fontSize: '12px' }}>
-                      {sample.score.toFixed(3)}
-                    </span>
-                  </div>
-                </td>
-                <td>
-                  <span className={`tag ${
-                    sample.n_layers >= 3 ? 'tag-critical'
-                    : sample.n_layers >= 2 ? 'tag-high'
-                    : 'tag-medium'
-                  }`}>
-                    {sample.n_layers}/{6}
-                  </span>
-                </td>
-                <td>
-                  <div className="flex flex-wrap gap-1">
-                    {sample.layers.map(l => (
-                      <span key={l} style={{
-                        fontSize: '10px',
-                        padding: '2px 6px',
-                        borderRadius: '4px',
-                        background: l === 'statistical' ? 'rgba(59, 130, 246, 0.15)'
-                          : l === 'spectral' ? 'rgba(139, 92, 246, 0.15)'
-                          : l === 'clustering' ? 'rgba(6, 182, 212, 0.15)'
-                          : l === 'influence' ? 'rgba(244, 114, 182, 0.15)'
-                          : l === 'backdoor' ? 'rgba(167, 139, 250, 0.15)'
-                          : 'rgba(249, 115, 22, 0.15)',
-                        color: l === 'statistical' ? '#60a5fa'
-                          : l === 'spectral' ? '#a78bfa'
-                          : l === 'clustering' ? '#22d3ee'
-                          : l === 'influence' ? '#f472b6'
-                          : l === 'backdoor' ? '#a78bfa'
-                          : '#fb923c',
-                        fontWeight: 500,
+                  </td>
+                  <td>
+                    <div className="flex items-center gap-2">
+                      <div style={{
+                        width: '48px',
+                        height: '5px',
+                        borderRadius: '3px',
+                        background: 'var(--border)',
+                        overflow: 'hidden',
                       }}>
-                        {l}
+                        <div style={{
+                          width: `${riskPct}%`,
+                          height: '100%',
+                          borderRadius: '3px',
+                          background: riskPct >= 80 ? 'var(--accent-red)'
+                            : riskPct >= 60 ? 'var(--accent-orange)'
+                            : riskPct >= 40 ? 'var(--accent-yellow)'
+                            : 'var(--accent-blue, #60a5fa)',
+                          transition: 'width 0.3s ease',
+                        }} />
+                      </div>
+                      <span style={{
+                        fontFamily: 'monospace',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        color: riskPct >= 80 ? 'var(--accent-red)'
+                          : riskPct >= 60 ? 'var(--accent-orange)'
+                          : riskPct >= 40 ? 'var(--accent-yellow)'
+                          : 'var(--text-secondary)',
+                      }}>
+                        {riskPct}%
                       </span>
-                    ))}
-                  </div>
-                </td>
-                <td>
-                  <span style={{
-                    fontSize: '11px',
-                    color: 'var(--text-secondary)',
-                    lineHeight: 1.4,
-                    display: 'block',
-                    maxWidth: '280px',
-                  }}>
-                    {sample.risk_reason || '—'}
-                  </span>
-                </td>
-                <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>
-                  {sample.label ?? '–'}
-                </td>
-              </tr>
-            ))}
+                    </div>
+                  </td>
+                  <td>
+                    <span style={{
+                      ...catStyle,
+                      padding: '3px 10px',
+                      borderRadius: '100px',
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      letterSpacing: '0.03em',
+                      textTransform: 'uppercase',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {sample.risk_category || 'Unknown'}
+                    </span>
+                  </td>
+                  <td>
+                    <span className={`tag ${
+                      sample.n_layers >= 3 ? 'tag-critical'
+                      : sample.n_layers >= 2 ? 'tag-high'
+                      : 'tag-medium'
+                    }`}>
+                      {sample.n_layers}/{6}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="flex flex-wrap gap-1">
+                      {sample.layers.map(l => (
+                        <span key={l} style={{
+                          fontSize: '10px',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          background: l === 'statistical' ? 'rgba(59, 130, 246, 0.15)'
+                            : l === 'spectral' ? 'rgba(139, 92, 246, 0.15)'
+                            : l === 'clustering' ? 'rgba(6, 182, 212, 0.15)'
+                            : l === 'influence' ? 'rgba(244, 114, 182, 0.15)'
+                            : l === 'backdoor' ? 'rgba(167, 139, 250, 0.15)'
+                            : 'rgba(249, 115, 22, 0.15)',
+                          color: l === 'statistical' ? '#60a5fa'
+                            : l === 'spectral' ? '#a78bfa'
+                            : l === 'clustering' ? '#22d3ee'
+                            : l === 'influence' ? '#f472b6'
+                            : l === 'backdoor' ? '#a78bfa'
+                            : '#fb923c',
+                          fontWeight: 500,
+                        }}>
+                          {l}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td>
+                    <span style={{
+                      fontSize: '11px',
+                      color: 'var(--text-secondary)',
+                      lineHeight: 1.4,
+                      display: 'block',
+                      maxWidth: '300px',
+                    }}>
+                      {sample.risk_reason || '—'}
+                    </span>
+                  </td>
+                  <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>
+                    {sample.label ?? '–'}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -199,7 +307,7 @@ function FlaggedSamplesTable({ flaggedSamples }) {
         <div className="flex items-center justify-between mt-4 text-xs"
           style={{ color: 'var(--text-muted)' }}>
           <span>
-            Page {page + 1} of {totalPages}
+            Page {page + 1} of {totalPages} · {sorted.length} samples
           </span>
           <div className="flex gap-2">
             <button
