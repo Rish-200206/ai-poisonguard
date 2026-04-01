@@ -99,6 +99,26 @@ graph TB
 - **Entropy-based anomaly detection**: per-feature, per-class entropy profiling
 - *Reference: Wang et al., "Neural Cleanse: Identifying and Mitigating Backdoor Attacks" (IEEE S&P 2019)*
 
+## Ensemble Voting Aggregation
+
+Instead of simple OR logic (any single layer flag → poisoned), AI PoisonGuard uses an **Ensemble Voting System** to reduce false positives:
+
+- **Threshold**: A sample must be flagged by **≥2 detection layers** to be confirmed as "Suspected Poison"
+- **Single-flag samples** are preserved as "Warnings" for transparency but not counted as confirmed poisoned
+- **Weighted Risk Score**: Each sample receives a 0-100% risk score based on layer confidence weights
+- **Risk Categories**: Warning (1 flag, 20%) → Compromised (2 flags, 40%) → High Risk (3 flags, 60%) → Critical (4+ flags, 80%+)
+
+### Layer Confidence Weights
+
+| Layer | Weight | Rationale |
+|-------|--------|-----------|
+| Layer 1 — Statistical (Z-score) | 0.10 | Noisiest, produces most false positives |
+| Layer 2 — Spectral (SVD) | 0.25 | Structurally robust, SVD-based |
+| Layer 3 — Activation Clustering | 0.25 | Structurally robust, learned features |
+| Layer 4 — IBM ART | 0.15 | Standardised detection framework |
+| Layer 5 — Influence Functions | 0.15 | Gradient-based, model-specific |
+| Layer 6 — Backdoor Trigger | 0.10 | Pattern-based scanning |
+
 ## India Domain Risk Profiles
 
 | Profile | Risk Level | Z-Threshold | IQR | Clusters | Min Purity |
@@ -172,11 +192,12 @@ This generates:
 
 ## Dashboard Visualisations
 
-1. **UMAP Cluster Scatter Plot** — 2D projection of clean vs. poisoned samples (colored by cluster)
+1. **UMAP Cluster Scatter Plot** — 3-tier 2D projection: Clean (cluster-colored), Warning (amber, 1-layer flag), Confirmed Poisoned (red, ≥2-layer flag)
 2. **Label Distribution Heatmap** — Anomalous label concentrations highlighted in red
 3. **Influence Score Bar Chart** — Top-20 most suspicious samples ranked by composite influence
-4. **Flagged Samples Table** — Sortable, with per-sample **risk reasons**, downloadable CSV export
-5. **Downloadable Risk Report** — Full HTML report with all layer results and flagged samples
+4. **Flagged Samples Table** — Sortable by **ensemble risk score**, with per-sample risk category badges (Warning/Compromised/High Risk/Critical), filter toggles (All/Confirmed/Warnings), and downloadable CSV
+5. **Risk Score Card** — Animated gauge with confirmed vs. warning counts and ensemble threshold display
+6. **Downloadable Risk Report** — Full HTML report with ensemble voting results, risk categories, and layer attribution
 
 ## Disclaimer
 
