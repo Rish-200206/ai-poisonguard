@@ -13,6 +13,8 @@ import numpy as np
 from typing import Optional
 import logging
 
+from .adaptive_threshold import adaptive_threshold as compute_adaptive_threshold
+
 logger = logging.getLogger(__name__)
 
 # ART availability is checked lazily at runtime
@@ -135,26 +137,34 @@ class ARTDetector:
     ) -> dict:
         """
         Fallback when ART is not installed.
-        Uses a simplified statistical approach as a proxy.
+        Uses Isolation Forest with adaptive thresholding.
         """
         from sklearn.ensemble import IsolationForest
 
         n_samples = X.shape[0]
 
+        # Use contamination='auto' so the decision function is data-driven
+        # instead of forcing exactly 5% flagging
         clf = IsolationForest(
-            contamination=0.05, random_state=42, n_jobs=-1
+            contamination='auto', random_state=42, n_jobs=-1
         )
-        predictions = clf.fit_predict(X)
+        clf.fit(X)
         scores_raw = -clf.score_samples(X)  # Higher = more anomalous
 
-        # Normalize
+        # Normalize to 0-1
         s_min, s_max = scores_raw.min(), scores_raw.max()
         if s_max > s_min:
             scores = (scores_raw - s_min) / (s_max - s_min)
         else:
             scores = np.zeros(n_samples)
 
-        flagged = predictions == -1
+        # Adaptive threshold instead of hardcoded contamination rate
+        threshold, flagged, threshold_method = compute_adaptive_threshold(
+            scores,
+            mad_multiplier=3.5,
+            min_score_floor=0.3,
+            fallback_percentile=97.0,
+        )
         flagged_indices = np.where(flagged)[0].tolist()
 
         return {
@@ -162,10 +172,11 @@ class ARTDetector:
             "layer_name": "IBM ART (Fallback — Isolation Forest)",
             "art_available": False,
             "n_samples": int(n_samples),
+            "threshold_method": threshold_method,
             "flagged_indices": flagged_indices,
             "n_flagged": int(flagged.sum()),
             "flagged_ratio": float(flagged.sum() / n_samples),
             "scores": scores.tolist(),
             "is_flagged": flagged.tolist(),
-            "report": "ART not installed. Using Isolation Forest fallback.",
+            "report": "ART not installed. Using Isolation Forest with adaptive thresholding.",
         }

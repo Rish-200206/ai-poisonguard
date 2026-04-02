@@ -192,6 +192,9 @@ python -m demo_data.generate_demo_model
 
 This generates:
 - `demo_upi_fraud.csv` — 2000 synthetic UPI transactions (5% poisoned)
+- `demo_upi_fraud_clean.csv` — 2000 clean samples (0% poison)
+- `demo_upi_fraud_25pct_mixed.csv` — 2000 samples (25% poisoned)
+- `demo_upi_fraud_40pct_poison.csv` — 2000 samples (40% poisoned, for demo)
 - `demo_credit_scoring.csv` — 2000 synthetic credit applications (5% poisoned)
 - `demo_model.pkl` — RandomForest trained on UPI fraud data
 - `demo_shadow_model.pt` — PyTorch shadow model

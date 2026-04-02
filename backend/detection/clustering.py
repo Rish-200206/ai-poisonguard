@@ -8,6 +8,11 @@ Detects training data poisoning via:
 4. Clustering with KMeans and analyzing cluster-label purity.
 5. Flagging low-purity clusters as potentially poisoned.
 
+Adaptive improvements (v2):
+- Auto-selects optimal k via silhouette analysis instead of forcing a fixed k.
+- Only flags clusters that are BOTH impure AND small (< max_cluster_frac of data).
+- Uses a minimum-impurity margin to avoid flagging marginally-impure clusters.
+
 Reference: Chen et al. "Detecting Backdoor Attacks on Deep Neural
 Networks by Activation Clustering." (2019)
 """
@@ -59,16 +64,25 @@ class ClusteringDetector:
         umap_min_dist: float = 0.1,
         shadow_n_estimators: int = 100,
         use_hdbscan: bool = True,
+        auto_k: bool = True,
+        max_cluster_frac: float = 0.20,
+        min_impurity_margin: float = 0.10,
     ):
         """
         Args:
-            n_clusters: Number of clusters for KMeans.
+            n_clusters: Number of clusters for KMeans (used as max when auto_k=True).
             purity_threshold: Cluster label purity threshold.
                 Clusters below this are flagged suspicious.
             umap_n_neighbors: UMAP n_neighbors parameter.
             umap_min_dist: UMAP min_dist parameter.
             shadow_n_estimators: Number of trees in fallback RandomForest.
             use_hdbscan: If True and available, use HDBSCAN; else KMeans.
+            auto_k: If True, auto-select optimal k via silhouette analysis.
+            max_cluster_frac: Maximum fraction of dataset a cluster can be
+                and still be flagged. Clusters larger than this are assumed
+                to be natural data subgroups, not poisoning.
+            min_impurity_margin: Minimum amount below purity_threshold
+                needed to actually flag a cluster. Prevents marginal flags.
         """
         self.n_clusters = n_clusters
         self.purity_threshold = purity_threshold
@@ -76,6 +90,9 @@ class ClusteringDetector:
         self.umap_min_dist = umap_min_dist
         self.shadow_n_estimators = shadow_n_estimators
         self.use_hdbscan = use_hdbscan
+        self.auto_k = auto_k
+        self.max_cluster_frac = max_cluster_frac
+        self.min_impurity_margin = min_impurity_margin
 
     def detect(
         self,
@@ -138,10 +155,9 @@ class ClusteringDetector:
             actual_k = len([c for c in unique_clusters if c >= 0])
             if actual_k < 2:
                 # HDBSCAN found too few clusters — fall back to KMeans
-                actual_k = min(self.n_clusters, n_samples)
-                kmeans = KMeans(n_clusters=actual_k, random_state=42, n_init=10)
-                cluster_labels = kmeans.fit_predict(coords_2d)
-                cluster_centers = kmeans.cluster_centers_
+                actual_k, cluster_labels, cluster_centers = self._auto_kmeans(
+                    coords_2d, n_samples
+                )
             else:
                 used_hdbscan = True
                 # Compute cluster centers manually for HDBSCAN
@@ -153,10 +169,9 @@ class ClusteringDetector:
                 ])
                 actual_k = len(all_clusters)
         else:
-            actual_k = min(self.n_clusters, n_samples)
-            kmeans = KMeans(n_clusters=actual_k, random_state=42, n_init=10)
-            cluster_labels = kmeans.fit_predict(coords_2d)
-            cluster_centers = kmeans.cluster_centers_
+            actual_k, cluster_labels, cluster_centers = self._auto_kmeans(
+                coords_2d, n_samples
+            )
 
         # Step 5: Compute silhouette score
         sil_score = -1.0
@@ -199,12 +214,28 @@ class ClusteringDetector:
                     str(k): int(v) for k, v in zip(unique, counts)
                 }
 
-            # Noise cluster (HDBSCAN label -1) is always suspicious
-            is_suspicious = purity < self.purity_threshold or c == -1
+            # ── Adaptive suspicion logic (v2) ──
+            # A cluster is suspicious ONLY if ALL of these hold:
+            #   1. Purity is meaningfully below threshold (not just marginally)
+            #   2. Cluster is small (< max_cluster_frac of dataset)
+            #      Large impure clusters are natural label overlap, not poisoning
+            #   3. OR: it's the HDBSCAN noise cluster (label -1)
+            cluster_frac = cluster_size / n_samples
+            impurity_margin = self.purity_threshold - purity
 
-            # Score samples in suspicious clusters higher
+            is_noise_cluster = c == -1
+            is_meaningfully_impure = impurity_margin >= self.min_impurity_margin
+            is_small_cluster = cluster_frac < self.max_cluster_frac
+
+            is_suspicious = (
+                is_noise_cluster
+                or (is_meaningfully_impure and is_small_cluster)
+            )
+
+            # Score samples in suspicious clusters
             if is_suspicious:
-                impurity_score = 1.0 - purity
+                # Scale score by how impure the cluster is
+                impurity_score = max(0.0, impurity_margin / self.purity_threshold)
                 scores[mask] = impurity_score
                 flagged_indices.extend(cluster_indices)
 
@@ -223,10 +254,18 @@ class ClusteringDetector:
             cluster_analysis.append({
                 "cluster_id": int(c),
                 "size": cluster_size,
+                "cluster_fraction": round(cluster_frac, 4),
                 "purity": round(purity, 4),
+                "impurity_margin": round(impurity_margin, 4),
                 "dominant_label": dominant_label,
                 "label_distribution": label_dist,
                 "is_suspicious": bool(is_suspicious),
+                "suspicion_reason": (
+                    "HDBSCAN noise cluster" if is_noise_cluster
+                    else f"impure (margin={impurity_margin:.2f}) and small ({cluster_frac:.1%})"
+                    if is_suspicious
+                    else "clean"
+                ),
                 "center": [float(x) for x in center],
                 "indices": cluster_indices,
             })
@@ -235,8 +274,9 @@ class ClusteringDetector:
         if scores.max() > 0:
             scores = scores / scores.max()
 
+        flagged_set = set(flagged_indices)
         is_flagged = np.array(
-            [i in flagged_indices for i in range(n_samples)]
+            [i in flagged_set for i in range(n_samples)]
         )
 
         clustering_method = "HDBSCAN" if used_hdbscan else "KMeans"
@@ -248,6 +288,8 @@ class ClusteringDetector:
             "n_samples": int(n_samples),
             "n_clusters": int(actual_k),
             "purity_threshold": self.purity_threshold,
+            "max_cluster_frac": self.max_cluster_frac,
+            "min_impurity_margin": self.min_impurity_margin,
             "silhouette_score": round(sil_score, 4),
             "flagged_indices": sorted(set(flagged_indices)),
             "n_flagged": int(is_flagged.sum()),
@@ -262,6 +304,55 @@ class ClusteringDetector:
             "clustering_method": clustering_method,
             "shadow_model": shadow_model_type,
         }
+
+    def _auto_kmeans(
+        self, coords_2d: np.ndarray, n_samples: int
+    ) -> tuple:
+        """
+        Auto-select optimal k for KMeans via silhouette analysis.
+
+        Tries k=2..max_k and picks the k with the best silhouette score.
+        This prevents forcing an arbitrary cluster count on data that may
+        have a different natural structure.
+
+        Returns:
+            (actual_k, cluster_labels, cluster_centers)
+        """
+        if not self.auto_k or n_samples < 10:
+            k = min(self.n_clusters, n_samples)
+            kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+            labels = kmeans.fit_predict(coords_2d)
+            return k, labels, kmeans.cluster_centers_
+
+        max_k = min(self.n_clusters, n_samples // 5, 10)  # Sensible upper bound
+        max_k = max(max_k, 2)  # At least try k=2
+
+        best_k = 2
+        best_score = -1.0
+        best_labels = None
+        best_centers = None
+
+        for k in range(2, max_k + 1):
+            try:
+                km = KMeans(n_clusters=k, random_state=42, n_init=10)
+                labels = km.fit_predict(coords_2d)
+                score = silhouette_score(coords_2d, labels)
+                if score > best_score:
+                    best_score = score
+                    best_k = k
+                    best_labels = labels
+                    best_centers = km.cluster_centers_
+            except Exception:
+                continue
+
+        if best_labels is None:
+            km = KMeans(n_clusters=2, random_state=42, n_init=10)
+            best_labels = km.fit_predict(coords_2d)
+            best_centers = km.cluster_centers_
+            best_k = 2
+
+        logger.info(f"Auto-selected k={best_k} (silhouette={best_score:.3f})")
+        return best_k, best_labels, best_centers
 
     def _extract_pytorch_activations(
         self, X: np.ndarray, y: np.ndarray

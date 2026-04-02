@@ -33,12 +33,17 @@ DOMAIN_PROFILES = {
         "min_anomaly_features": 1,
         # Layer 2: Spectral Analysis
         "spectral_top_k": 5,
-        "spectral_percentile": 93.0,  # More sensitive
+        "spectral_percentile": 95.0,  # Fallback cap
         # Layer 3: Clustering
         "n_clusters": 6,
         "purity_threshold": 0.80,     # Lower purity tolerance
         "umap_n_neighbors": 20,
         "umap_min_dist": 0.05,
+        # Adaptive threshold parameters
+        "mad_multiplier": 3.0,        # More aggressive for financial fraud
+        "min_score_floor": 0.25,
+        "max_cluster_frac": 0.20,     # Only flag clusters < 20% of data
+        "min_impurity_margin": 0.08,  # More sensitive impurity margin
         # Risk score weights
         "layer_weights": {
             "statistical": 0.20,
@@ -79,12 +84,17 @@ DOMAIN_PROFILES = {
         "min_anomaly_features": 2,    # Require multiple anomalous features
         # Layer 2: Spectral Analysis
         "spectral_top_k": 3,
-        "spectral_percentile": 95.0,
+        "spectral_percentile": 97.0,
         # Layer 3: Clustering
         "n_clusters": 4,
         "purity_threshold": 0.85,
         "umap_n_neighbors": 15,
         "umap_min_dist": 0.1,
+        # Adaptive threshold parameters
+        "mad_multiplier": 3.5,
+        "min_score_floor": 0.30,
+        "max_cluster_frac": 0.25,
+        "min_impurity_margin": 0.10,
         # Risk score weights
         "layer_weights": {
             "statistical": 0.25,
@@ -127,12 +137,17 @@ DOMAIN_PROFILES = {
         "min_anomaly_features": 2,
         # Layer 2: Spectral Analysis
         "spectral_top_k": 4,
-        "spectral_percentile": 94.0,
+        "spectral_percentile": 96.0,
         # Layer 3: Clustering
         "n_clusters": 5,
         "purity_threshold": 0.82,
         "umap_n_neighbors": 18,
         "umap_min_dist": 0.08,
+        # Adaptive threshold parameters
+        "mad_multiplier": 3.2,
+        "min_score_floor": 0.28,
+        "max_cluster_frac": 0.22,
+        "min_impurity_margin": 0.09,
         # Risk score weights
         "layer_weights": {
             "statistical": 0.20,
@@ -164,11 +179,16 @@ DOMAIN_PROFILES = {
         "iqr_multiplier": 1.5,
         "min_anomaly_features": 1,
         "spectral_top_k": 3,
-        "spectral_percentile": 95.0,
+        "spectral_percentile": 97.0,
         "n_clusters": 5,
         "purity_threshold": 0.85,
         "umap_n_neighbors": 15,
         "umap_min_dist": 0.1,
+        # Adaptive threshold parameters
+        "mad_multiplier": 3.5,
+        "min_score_floor": 0.30,
+        "max_cluster_frac": 0.25,
+        "min_impurity_margin": 0.10,
         "layer_weights": {
             "statistical": 0.20,
             "spectral": 0.20,

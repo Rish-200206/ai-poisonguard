@@ -14,6 +14,7 @@ from .spectral import SpectralDetector
 from .clustering import ClusteringDetector, _check_hdbscan
 from .influence import InfluenceFunctionDetector
 from .backdoor import BackdoorTriggerDetector
+from .adaptive_threshold import adaptive_threshold
 
 __all__ = [
     "StatisticalDetector",
@@ -21,5 +22,6 @@ __all__ = [
     "ClusteringDetector",
     "InfluenceFunctionDetector",
     "BackdoorTriggerDetector",
+    "adaptive_threshold",
     "_check_hdbscan",
 ]

@@ -16,6 +16,8 @@ import numpy as np
 import logging
 from typing import Optional
 
+from .adaptive_threshold import adaptive_threshold as compute_adaptive_threshold
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,18 +27,24 @@ class InfluenceFunctionDetector:
     def __init__(
         self,
         n_loo_samples: int = 200,
-        influence_percentile: float = 95.0,
+        influence_percentile: float = 97.0,
         use_tracin: bool = True,
+        mad_multiplier: float = 3.5,
+        min_score_floor: float = 0.3,
     ):
         """
         Args:
             n_loo_samples: Max samples for LOO estimation (subsampled for speed).
-            influence_percentile: Percentile above which samples are flagged.
+            influence_percentile: Percentile fallback cap.
             use_tracin: If True and PyTorch available, use TracIn-style gradient tracing.
+            mad_multiplier: MAD multiplier for adaptive thresholding.
+            min_score_floor: Minimum normalized score to consider flagging.
         """
         self.n_loo_samples = n_loo_samples
         self.influence_percentile = influence_percentile
         self.use_tracin = use_tracin
+        self.mad_multiplier = mad_multiplier
+        self.min_score_floor = min_score_floor
 
     def detect(
         self,
@@ -154,8 +162,13 @@ class InfluenceFunctionDetector:
         else:
             scores = np.zeros(n_samples)
 
-        threshold = np.percentile(scores, self.influence_percentile)
-        flagged = scores > threshold
+        # Adaptive threshold instead of fixed percentile
+        threshold, flagged, threshold_method = compute_adaptive_threshold(
+            scores,
+            mad_multiplier=self.mad_multiplier,
+            min_score_floor=self.min_score_floor,
+            fallback_percentile=self.influence_percentile,
+        )
         flagged_indices = np.where(flagged)[0].tolist()
 
         # Compute influence ranking
@@ -168,6 +181,7 @@ class InfluenceFunctionDetector:
             "n_samples": int(n_samples),
             "n_checkpoints": n_checkpoints,
             "threshold": float(threshold),
+            "threshold_method": threshold_method,
             "flagged_indices": flagged_indices,
             "n_flagged": int(flagged.sum()),
             "flagged_ratio": float(flagged.sum() / n_samples),
@@ -258,8 +272,13 @@ class InfluenceFunctionDetector:
         else:
             scores = np.zeros(n_samples)
 
-        threshold = np.percentile(scores, self.influence_percentile)
-        flagged = scores > threshold
+        # Adaptive threshold instead of fixed percentile
+        threshold, flagged, threshold_method = compute_adaptive_threshold(
+            scores,
+            mad_multiplier=self.mad_multiplier,
+            min_score_floor=self.min_score_floor,
+            fallback_percentile=self.influence_percentile,
+        )
         flagged_indices = np.where(flagged)[0].tolist()
 
         influence_ranking = np.argsort(scores)[::-1][:20].tolist()
@@ -271,6 +290,7 @@ class InfluenceFunctionDetector:
             "n_samples": int(n_samples),
             "n_loo_evaluated": int(min(50, n_loo)),
             "threshold": float(threshold),
+            "threshold_method": threshold_method,
             "flagged_indices": flagged_indices,
             "n_flagged": int(flagged.sum()),
             "flagged_ratio": float(flagged.sum() / n_samples),

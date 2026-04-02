@@ -14,6 +14,8 @@ import numpy as np
 from scipy import stats
 from typing import Optional
 
+from .adaptive_threshold import adaptive_threshold
+
 
 class SpectralDetector:
     """SVD-based spectral signature poisoning detector."""
@@ -23,16 +25,22 @@ class SpectralDetector:
         top_k_singular: int = 3,
         percentile_threshold: float = 95.0,
         score_method: str = "correlation",
+        mad_multiplier: float = 3.5,
+        min_score_floor: float = 0.3,
     ):
         """
         Args:
             top_k_singular: Number of top singular vectors to analyze.
-            percentile_threshold: Percentile threshold for outlier flagging.
+            percentile_threshold: Percentile fallback cap for outlier flagging.
             score_method: Scoring method — 'correlation' or 'projection'.
+            mad_multiplier: MAD multiplier for adaptive thresholding.
+            min_score_floor: Minimum normalized score to consider flagging.
         """
         self.top_k_singular = top_k_singular
         self.percentile_threshold = percentile_threshold
         self.score_method = score_method
+        self.mad_multiplier = mad_multiplier
+        self.min_score_floor = min_score_floor
 
     def detect(
         self,
@@ -74,11 +82,22 @@ class SpectralDetector:
         else:
             scores = self._projection_scores(X_centered, Vt, k)
 
-        # Step 4: Flag outliers based on percentile threshold
-        threshold = np.percentile(scores, self.percentile_threshold)
-        flagged = scores > threshold
+        # Step 4: Normalize scores to 0-1 BEFORE thresholding
+        score_min, score_max = scores.min(), scores.max()
+        if score_max > score_min:
+            normalized_scores = (scores - score_min) / (score_max - score_min)
+        else:
+            normalized_scores = np.zeros(n_samples)
 
-        # Step 5: Per-class analysis if labels are provided
+        # Step 5: Flag outliers using ADAPTIVE threshold
+        threshold, flagged, threshold_method = adaptive_threshold(
+            normalized_scores,
+            mad_multiplier=self.mad_multiplier,
+            min_score_floor=self.min_score_floor,
+            fallback_percentile=self.percentile_threshold,
+        )
+
+        # Step 6: Per-class analysis if labels are provided
         per_class_results = None
         if y is not None:
             per_class_results = self._per_class_analysis(
@@ -88,13 +107,6 @@ class SpectralDetector:
         # Singular value analysis (poisoning often inflates top singular values)
         sv_analysis = self._analyze_singular_values(S)
 
-        # Normalize scores to 0-1
-        score_min, score_max = scores.min(), scores.max()
-        if score_max > score_min:
-            normalized_scores = (scores - score_min) / (score_max - score_min)
-        else:
-            normalized_scores = np.zeros(n_samples)
-
         return {
             "layer": "spectral",
             "layer_name": "SVD Spectral Signature Analysis",
@@ -102,6 +114,7 @@ class SpectralDetector:
             "n_features": int(n_features),
             "top_k_singular": int(k),
             "threshold": float(threshold),
+            "threshold_method": threshold_method,
             "flagged_indices": np.where(flagged)[0].tolist(),
             "n_flagged": int(flagged.sum()),
             "flagged_ratio": float(flagged.sum() / n_samples),

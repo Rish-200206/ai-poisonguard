@@ -19,6 +19,8 @@ import logging
 from typing import Optional
 from scipy import stats
 
+from .adaptive_threshold import adaptive_threshold as compute_adaptive_threshold
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,18 +31,24 @@ class BackdoorTriggerDetector:
         self,
         entropy_threshold: float = 0.3,
         pattern_min_count: int = 5,
-        trigger_percentile: float = 95.0,
+        trigger_percentile: float = 97.0,
+        mad_multiplier: float = 3.5,
+        min_score_floor: float = 0.3,
     ):
         """
         Args:
             entropy_threshold: Normalized entropy below which a feature is
                 flagged as potentially containing a trigger (low entropy = fixed values).
             pattern_min_count: Minimum samples sharing a pattern to flag it.
-            trigger_percentile: Percentile for trigger score flagging.
+            trigger_percentile: Percentile fallback cap for trigger score flagging.
+            mad_multiplier: MAD multiplier for adaptive thresholding.
+            min_score_floor: Minimum score to consider flagging.
         """
         self.entropy_threshold = entropy_threshold
         self.pattern_min_count = pattern_min_count
         self.trigger_percentile = trigger_percentile
+        self.mad_multiplier = mad_multiplier
+        self.min_score_floor = min_score_floor
 
     def detect(
         self,
@@ -93,8 +101,13 @@ class BackdoorTriggerDetector:
             if scores.max() > 0:
                 scores = scores / scores.max()
 
-            threshold = np.percentile(scores, self.trigger_percentile)
-            flagged = scores > threshold
+            # Adaptive threshold instead of fixed percentile
+            threshold, flagged, threshold_method = compute_adaptive_threshold(
+                scores,
+                mad_multiplier=self.mad_multiplier,
+                min_score_floor=self.min_score_floor,
+                fallback_percentile=self.trigger_percentile,
+            )
             flagged_indices = np.where(flagged)[0].tolist()
 
             # Detected trigger features
@@ -106,6 +119,7 @@ class BackdoorTriggerDetector:
                 "n_samples": int(n_samples),
                 "n_features": int(n_features),
                 "threshold": float(threshold),
+                "threshold_method": threshold_method,
                 "flagged_indices": flagged_indices,
                 "n_flagged": int(flagged.sum()),
                 "flagged_ratio": float(flagged.sum() / n_samples),

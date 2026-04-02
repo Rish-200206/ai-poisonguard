@@ -247,6 +247,8 @@ async def analyze_dataset(
     spec_detector = SpectralDetector(
         top_k_singular=profile["spectral_top_k"],
         percentile_threshold=profile["spectral_percentile"],
+        mad_multiplier=profile.get("mad_multiplier", 3.5),
+        min_score_floor=profile.get("min_score_floor", 0.3),
     )
     spec_result = spec_detector.detect(X, y)
 
@@ -257,6 +259,9 @@ async def analyze_dataset(
         purity_threshold=profile["purity_threshold"],
         umap_n_neighbors=profile["umap_n_neighbors"],
         umap_min_dist=profile["umap_min_dist"],
+        auto_k=True,
+        max_cluster_frac=profile.get("max_cluster_frac", 0.25),
+        min_impurity_margin=profile.get("min_impurity_margin", 0.10),
     )
     clust_result = clust_detector.detect(X, y)
 
@@ -267,12 +272,18 @@ async def analyze_dataset(
 
     # Layer 5: Influence Function Analysis
     logger.info("Running Layer 5: Influence Function Analysis...")
-    influence_detector = InfluenceFunctionDetector()
+    influence_detector = InfluenceFunctionDetector(
+        mad_multiplier=profile.get("mad_multiplier", 3.5),
+        min_score_floor=profile.get("min_score_floor", 0.3),
+    )
     influence_result = influence_detector.detect(X, y, model)
 
     # Layer 6: Backdoor Trigger Scanning
     logger.info("Running Layer 6: Backdoor Trigger Scanning...")
-    backdoor_detector = BackdoorTriggerDetector()
+    backdoor_detector = BackdoorTriggerDetector(
+        mad_multiplier=profile.get("mad_multiplier", 3.5),
+        min_score_floor=profile.get("min_score_floor", 0.3),
+    )
     backdoor_result = backdoor_detector.detect(X, y, model)
 
     # ═══════════════════════════════════════════════════════════════
