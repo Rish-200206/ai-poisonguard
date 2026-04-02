@@ -4,11 +4,23 @@
 
 > 🏆 VIBE6 INNOVATHON 2026 — SVKM's NMIMS, Indore — Challenge 4 Submission
 
+---
+
+## 🎬 Demo Video
+
+[![AI PoisonGuard Demo](https://img.shields.io/badge/▶%20Watch%20Demo-Google%20Drive-blue?style=for-the-badge&logo=google-drive)](https://drive.google.com/file/d/10ekdMPwhGApg76nw69clcBdWLV5UBqft/view?usp=sharing)
+
+> Click the badge above to watch the full project walkthrough and live demonstration.
+
+---
+
 ## Executive Summary
 
 AI PoisonGuard is a web-based dashboard that detects adversarial training data poisoning attacks on ML models deployed in India's critical fintech and government systems (UPI, Aadhaar KYC, PMJAY). It accepts uploaded ML models (`.pkl`, `.h5`, `.onnx`) and CSV training datasets, runs a **6-layer detection pipeline**, and produces a visual **Poison Risk Report** detailing affected data clusters, mislabeled samples, backdoor trigger patterns, and anomalous weight patterns.
 
-⚠️ **Educational prototype** using mock/synthetic data only. Not a production-ready, government-certified, or commercial auditing tool.
+> ⚠️ **Educational prototype** using mock/synthetic data only. Not a production-ready, government-certified, or commercial auditing tool.
+
+---
 
 ## Architecture
 
@@ -59,6 +71,8 @@ graph TB
     ReportGen --> Dashboard
 ```
 
+---
+
 ## Detection Engine — 6 Layers
 
 ### Layer 1 — Statistical Analysis (Z-score + IQR)
@@ -86,18 +100,20 @@ graph TB
 - ActivationDefence cross-validation with configurable clustering
 - Graceful fallback to Isolation Forest when ART is unavailable
 
-### Layer 5 — Influence Function Analysis (NEW)
+### Layer 5 — Influence Function Analysis
 - **TracIn gradient-based** self-influence scoring (PyTorch, with checkpoint accumulation)
 - **Leave-One-Out (LOO)** influence estimation for disproportionately impactful samples
 - OOB probability-based confidence analysis
 - *Reference: Koh & Liang, "Understanding Black-box Predictions via Influence Functions" (ICML 2017)*
 - *Reference: Pruthi et al., "Estimating Training Data Influence by Tracing Gradient Descent" (NeurIPS 2020)*
 
-### Layer 6 — Backdoor Trigger Scanning (NEW)
+### Layer 6 — Backdoor Trigger Scanning
 - **Feature-space trigger detection**: fixed/constant value patterns co-occurring with label subsets
 - **Neural Cleanse-inspired** perturbation analysis: minimum perturbation to flip predictions
 - **Entropy-based anomaly detection**: per-feature, per-class entropy profiling
 - *Reference: Wang et al., "Neural Cleanse: Identifying and Mitigating Backdoor Attacks" (IEEE S&P 2019)*
+
+---
 
 ## Ensemble Voting Aggregation
 
@@ -105,7 +121,7 @@ Instead of simple OR logic (any single layer flag → poisoned), AI PoisonGuard 
 
 - **Threshold**: A sample must be flagged by **≥2 detection layers** to be confirmed as "Suspected Poison"
 - **Single-flag samples** are preserved as "Warnings" for transparency but not counted as confirmed poisoned
-- **Weighted Risk Score**: Each sample receives a 0-100% risk score based on layer confidence weights
+- **Weighted Risk Score**: Each sample receives a 0–100% risk score based on layer confidence weights
 - **Risk Categories**: Warning (1 flag, 20%) → Compromised (2 flags, 40%) → High Risk (3 flags, 60%) → Critical (4+ flags, 80%+)
 
 ### Layer Confidence Weights
@@ -119,6 +135,8 @@ Instead of simple OR logic (any single layer flag → poisoned), AI PoisonGuard 
 | Layer 5 — Influence Functions | 0.15 | Gradient-based, model-specific |
 | Layer 6 — Backdoor Trigger | 0.10 | Pattern-based scanning |
 
+---
+
 ## India Domain Risk Profiles
 
 | Profile | Risk Level | Z-Threshold | IQR | Clusters | Min Purity |
@@ -130,6 +148,8 @@ Instead of simple OR logic (any single layer flag → poisoned), AI PoisonGuard 
 
 **Regulatory context**: RBI Digital Payment Security Controls (2021), NPCI UPI Fraud Monitoring Guidelines, UIDAI Aadhaar Act 2016, MeitY Digital India Guidelines, CERT-In Cyber Security Framework, DPDP Act 2023.
 
+---
+
 ## Tech Stack
 
 | Component | Technology |
@@ -140,6 +160,8 @@ Instead of simple OR logic (any single layer flag → poisoned), AI PoisonGuard 
 | API Layer | FastAPI + Uvicorn |
 | Frontend | React 18+ (Vite) + Recharts + D3.js |
 | Styling | Custom CSS (glassmorphism design system) |
+
+---
 
 ## Quick Start
 
@@ -174,6 +196,8 @@ This generates:
 - `demo_model.pkl` — RandomForest trained on UPI fraud data
 - `demo_shadow_model.pt` — PyTorch shadow model
 
+---
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
@@ -190,6 +214,8 @@ This generates:
 | `.h5` | Keras / TensorFlow | ✅ Full |
 | `.onnx` | ONNX Runtime | ✅ Full |
 
+---
+
 ## Dashboard Visualisations
 
 1. **UMAP Cluster Scatter Plot** — 3-tier 2D projection: Clean (cluster-colored), Warning (amber, 1-layer flag), Confirmed Poisoned (red, ≥2-layer flag)
@@ -199,14 +225,16 @@ This generates:
 5. **Risk Score Card** — Animated gauge with confirmed vs. warning counts and ensemble threshold display
 6. **Downloadable Risk Report** — Full HTML report with ensemble voting results, risk categories, and layer attribution
 
+---
+
 ## Disclaimer
 
-⚠️ **Educational prototype** using mock/synthetic data only. Not a production tool.
+> ⚠️ **Educational prototype** using mock/synthetic data only. Not a production tool.
 
 Real-world deployment would require:
 - CERT-In empanelment under IT Act 2000 Section 70
 - RBI AI/ML Governance Framework 2024 alignment (explainability)
-- DPDP Act 2023 compliance (6-12 month process minimum)
+- DPDP Act 2023 compliance (6–12 month process minimum)
 - No PII/real transaction data permitted
 - Responsible disclosure norms apply
 
